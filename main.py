@@ -7,6 +7,7 @@ Command-line interface for the autonomous agent system
 import asyncio
 import sys
 from pathlib import Path
+from typing import Dict, Any
 
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent))
@@ -15,6 +16,8 @@ from main_manager import MainManager
 from utils.logger import system_logger
 from utils.config import Config
 from input_handlers import CommandParser, NLPConverter, IntentType
+from agents.conversational_agent import ConversationalAgent
+from input_handlers.project_planner import ProjectPlanner
 
 logger = system_logger
 
@@ -36,34 +39,146 @@ async def main():
         # Initialize NLI components
         command_parser = CommandParser(manager.llm_client)
         nlp_converter = NLPConverter(manager.llm_client)
+        
+        # Initialize conversational agent and planner
+        agent = ConversationalAgent(manager.llm_client)
+        planner = ProjectPlanner(manager.llm_client)
 
-        # Interactive loop
-        while True:
-            try:
-                user_input = input("\n🤖 Enter command or natural language (help for options): ").strip()
-
-                if not user_input:
-                    continue
-
-                # Parse input using NLI
-                intent = command_parser.parse(user_input)
-
-                # Handle based on detected intent
-                await handle_intent(intent, manager, nlp_converter)
-
-            except KeyboardInterrupt:
-                logger.info("\nShutting down...")
-                manager.agent_pool.stop()
-                break
-            except Exception as e:
-                logger.error(f"Error: {str(e)}")
+        # Interactive loop - Conversational mode
+        await run_conversational_loop(manager, agent, planner)
 
         logger.info("✓ System shutdown complete")
         return 0
 
+    except KeyboardInterrupt:
+        logger.info("\nShutting down...")
+        manager.agent_pool.stop()
+        return 0
     except Exception as e:
         logger.error(f"Fatal error: {str(e)}")
         return 1
+
+
+async def run_conversational_loop(manager: MainManager, agent: ConversationalAgent, planner: ProjectPlanner) -> None:
+    """
+    Run the conversational interaction loop with the user
+    
+    Args:
+        manager: MainManager instance
+        agent: ConversationalAgent instance
+        planner: ProjectPlanner instance
+    """
+    print("\nAgent is ready to chat! Tell me about your project or type 'help' for options.\n")
+    
+    while True:
+        try:
+            user_input = input("You: ").strip()
+            
+            if not user_input:
+                continue
+            
+            # Handle traditional commands
+            if user_input.lower() in ['help', '?']:
+                print_help()
+                continue
+            elif user_input.lower() in ['exit', 'quit', 'bye', 'goodbye']:
+                print("\nAgent: Goodbye! See you next time.")
+                logger.info("User initiated shutdown")
+                manager.agent_pool.stop()
+                break
+            elif user_input.lower() == 'list':
+                await handle_list_projects(manager)
+                continue
+            elif user_input.lower() == 'status':
+                manager.display_status()
+                continue
+            
+            # Get agent response
+            response = agent.chat(user_input)
+            print(f"\nAgent: {response}\n")
+            
+            # Check if user is describing a project
+            if agent.should_create_project(user_input):
+                # Analyze project description
+                project_info = agent.analyze_project_description(user_input)
+                
+                if project_info.get('is_project_description'):
+                    print("\nAnalyzing your project requirements...\n")
+                    
+                    # Generate plan
+                    plan = planner.generate_plan(project_info)
+                    
+                    # Display plan
+                    print(planner.display_plan(plan))
+                    
+                    # Ask for confirmation
+                    confirm = input("Would you like to create this project? (yes/no): ").strip().lower()
+                    
+                    if confirm in ['yes', 'y', 'ha', 'ji', 'theek']:
+                        # Store plan context and proceed with project creation
+                        agent.set_context({
+                            'project_plan': plan,
+                            'project_info': project_info
+                        })
+                        
+                        print("\nGreat! Creating your project...\n")
+                        await handle_new_project_with_plan(manager, plan)
+                        
+                        # Reset for next project
+                        agent.clear_history()
+                    else:
+                        print("\nNo problem! Feel free to describe a different project or use 'new' to get started manually.\n")
+                        
+        except KeyboardInterrupt:
+            print("\n\nAgent: Goodbye!")
+            manager.agent_pool.stop()
+            break
+        except Exception as e:
+            logger.error(f"Error in conversation loop: {str(e)}")
+            print(f"\nAgent: I encountered an issue: {str(e)}. Let's try again.\n")
+
+
+async def handle_new_project_with_plan(manager: MainManager, plan: Dict[str, Any]) -> None:
+    """
+    Handle project creation with generated plan
+    
+    Args:
+        manager: MainManager instance
+        plan: Generated project plan
+    """
+    try:
+        project_name = plan.get('project_name', 'New Project').replace(' ', '-').lower()
+        
+        print(f"\n{'=' * 70}")
+        print(f"Creating Project: {project_name}")
+        print(f"{'=' * 70}\n")
+        
+        # Prepare project request with plan info
+        project_request = {
+            'name': project_name,
+            'type': plan.get('project_type', 'website'),
+            'description': plan.get('description', ''),
+            'features': plan.get('key_features', []),
+            'components': plan.get('components', []),
+            'requirements': plan.get('requirements', []),
+            'plan': plan
+        }
+        
+        # In real implementation, this would trigger the agent system
+        # For now, show what would be created
+        print("Project Structure:")
+        for component in plan.get('components', []):
+            print(f"  ✓ {component}")
+        
+        print("\nProject Tasks:")
+        for i, task in enumerate(plan.get('tasks', []), 1):
+            print(f"  {i}. {task}")
+        
+        print(f"\nProject created successfully!")
+        
+    except Exception as e:
+        logger.error(f"Error creating project with plan: {str(e)}")
+        print(f"Error: {str(e)}")
 
 
 async def handle_intent(intent, manager: MainManager, nlp_converter: NLPConverter) -> None:
