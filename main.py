@@ -14,6 +14,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 from main_manager import MainManager
 from utils.logger import system_logger
 from utils.config import Config
+from input_handlers import CommandParser, NLPConverter, IntentType
 
 logger = system_logger
 
@@ -32,37 +33,23 @@ async def main():
         # Display available commands
         print_welcome_message()
 
+        # Initialize NLI components
+        command_parser = CommandParser(manager.llm_client)
+        nlp_converter = NLPConverter(manager.llm_client)
+
         # Interactive loop
         while True:
             try:
-                command = input("\n🤖 Enter command (help for options): ").strip().lower()
+                user_input = input("\n🤖 Enter command or natural language (help for options): ").strip()
 
-                if not command:
+                if not user_input:
                     continue
 
-                if command == "help":
-                    print_help()
+                # Parse input using NLI
+                intent = command_parser.parse(user_input)
 
-                elif command == "new":
-                    await handle_new_project(manager)
-
-                elif command == "work":
-                    await handle_work(manager)
-
-                elif command == "status":
-                    manager.display_status()
-
-                elif command == "list":
-                    await handle_list_projects(manager)
-
-                elif command == "exit" or command == "quit":
-                    logger.info("Shutting down system...")
-                    manager.agent_pool.stop()
-                    break
-
-                else:
-                    logger.warning(f"Unknown command: {command}")
-                    print("Type 'help' for available commands")
+                # Handle based on detected intent
+                await handle_intent(intent, manager, nlp_converter)
 
             except KeyboardInterrupt:
                 logger.info("\nShutting down...")
@@ -77,6 +64,55 @@ async def main():
     except Exception as e:
         logger.error(f"Fatal error: {str(e)}")
         return 1
+
+
+async def handle_intent(intent, manager: MainManager, nlp_converter: NLPConverter) -> None:
+    """
+    Route user intent to appropriate handler
+
+    Args:
+        intent: Intent object from parser
+        manager: MainManager instance
+        nlp_converter: NLPConverter instance
+    """
+    if intent.intent_type == IntentType.HELP_REQUEST:
+        print_help()
+
+    elif intent.intent_type == IntentType.TASK_CREATION:
+        # Ask for clarification if needed
+        if intent.clarification_needed or intent.confidence < 0.9:
+            logger.info("📝 Let me gather more details about your project...")
+            await handle_new_project(manager)
+        else:
+            await handle_new_project(manager)
+
+    elif intent.intent_type == IntentType.PROJECT_WORK:
+        await handle_work(manager)
+
+    elif intent.intent_type == IntentType.LIST_ITEMS:
+        await handle_list_projects(manager)
+
+    elif intent.intent_type == IntentType.STATUS:
+        manager.display_status()
+
+    elif intent.intent_type == IntentType.GREETING:
+        print("👋 Hello! What would you like to do? Type 'help' for options or describe your project.")
+
+    elif intent.intent_type == IntentType.EXIT:
+        logger.info("Shutting down system...")
+        manager.agent_pool.stop()
+        raise KeyboardInterrupt()
+
+    elif intent.intent_type == IntentType.UNCLEAR:
+        # Ask for clarification
+        if intent.clarification_message:
+            print(f"🤔 {intent.clarification_message}")
+        else:
+            print("I didn't understand that. Try:")
+            print("  - 'new' to create a project")
+            print("  - 'work' to work on a project")
+            print("  - 'list' to see your projects")
+            print("  - 'help' for all commands")
 
 
 async def handle_new_project(manager: MainManager) -> None:
@@ -194,6 +230,7 @@ def print_help() -> None:
     print("=" * 60)
     print(
         """
+COMMANDS (Traditional):
   new          - Create a new project
   work         - Work on existing project
   list         - List all projects
@@ -201,8 +238,16 @@ def print_help() -> None:
   help         - Show this help message
   exit/quit    - Shut down system
 
+NATURAL LANGUAGE (Supported):
+  "build a website"            - Create a new project
+  "mujhe app bana do"          - Create a new project (Urdu)
+  "show my projects"           - List all projects
+  "what's the status?"         - Show system status
+  "hello"                      - Greet the system
+  "help me"                    - Show this help
+
 WORKFLOW:
-  1. 'new' to create a project
+  1. Type 'new' or 'build something' to create a project
   2. System will ask requirements interactively
   3. Specification will be generated automatically
   4. Agents will execute and build your project
