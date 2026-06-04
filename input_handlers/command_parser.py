@@ -5,6 +5,7 @@ Intelligent intent detection from user input (natural language + command-based)
 
 import logging
 from typing import Dict, List, Optional, Any
+from difflib import SequenceMatcher
 from .intent_types import IntentType, Intent
 
 logger = logging.getLogger(__name__)
@@ -34,8 +35,8 @@ class CommandParser:
                 "urdu_keywords": ["سلام", "ہلو", "ہیلو", "نمستے"],
             },
             IntentType.TASK_CREATION: {
-                "keywords": ["create", "build", "make", "develop", "generate", "start", "new project", "new", "bana do"],
-                "urdu_keywords": ["بنانا", "بناؤ", "بنا دو", "تیار کرو", "بنایا"],
+                "keywords": ["create", "build", "make", "develop", "generate", "start", "new project", "new", "bana do", "creat", "bild", "website", "app", "project"],
+                "urdu_keywords": ["بنانا", "بناؤ", "بنا دو", "تیار کرو", "بنایا", "بنائیں"],
             },
             IntentType.HELP_REQUEST: {
                 "keywords": ["help", "how", "guide", "tutorial", "assist", "?", "what can you do"],
@@ -107,7 +108,7 @@ class CommandParser:
 
     def _try_keyword_matching(self, user_input: str) -> Optional[Intent]:
         """
-        Try to match input against known keyword patterns
+        Try to match input against known keyword patterns with fuzzy matching
 
         Args:
             user_input: User input to match
@@ -124,10 +125,10 @@ class CommandParser:
 
             # Check for exact or partial matches
             for keyword in keywords:
+                # Try exact substring match first (highest priority)
                 if keyword in user_input_lower:
-                    # Calculate confidence based on match quality
                     confidence = min(1.0, len(keyword) / len(user_input_lower) * 2)
-
+                    
                     if confidence > best_score:
                         best_score = confidence
                         best_match = Intent(
@@ -136,8 +137,53 @@ class CommandParser:
                             raw_input=user_input,
                             extracted_params={"keyword": keyword},
                         )
+                else:
+                    # Try fuzzy matching for typos and variations (lower priority)
+                    fuzzy_score = self._fuzzy_match(keyword, user_input_lower)
+                    if fuzzy_score > 0.75:  # 75% match threshold for typos
+                        if fuzzy_score > best_score:
+                            best_score = fuzzy_score
+                            best_match = Intent(
+                                intent_type=intent_type,
+                                confidence=fuzzy_score * 0.9,  # Slightly lower confidence for fuzzy matches
+                                raw_input=user_input,
+                                extracted_params={"keyword": keyword, "matched_fuzzy": True},
+                            )
 
         return best_match
+
+    def _fuzzy_match(self, keyword: str, user_input: str) -> float:
+        """
+        Calculate fuzzy match score between keyword and user input
+        Handles typos, truncation, and variations
+
+        Args:
+            keyword: Target keyword to match
+            user_input: User input string
+
+        Returns:
+            Match score 0.0-1.0
+        """
+        # Check if keyword is present as subsequence in user input
+        if keyword in user_input:
+            return 1.0
+
+        # Split user input into words and check each word
+        words = user_input.split()
+        for word in words:
+            # Use SequenceMatcher for similarity ratio
+            ratio = SequenceMatcher(None, keyword, word).ratio()
+            if ratio > 0.75:
+                return ratio
+
+        # Check for partial matches (keyword starts word, or word contains keyword)
+        for word in words:
+            if keyword.startswith(word[:3]) or word.startswith(keyword[:3]):
+                partial_ratio = SequenceMatcher(None, keyword, word).ratio()
+                if partial_ratio > 0.6:
+                    return partial_ratio * 0.9
+
+        return 0.0
 
     def _try_llm_parsing(self, user_input: str) -> Optional[Intent]:
         """
