@@ -1,0 +1,28 @@
+# Autonomous Agent System - Dependencies
+
+# Core Python
+python-dotenv==1.0.0
+
+# LLM Providers
+groq==0.4.1
+aiohttp==3.9.1
+certifi==2024.2.2
+
+# Async/Concurrency
+asyncio-contextmanager==1.0.0
+
+# Utilities
+click==8.1.7
+colorama==0.4.6
+tqdm==4.66.1
+
+# Development
+pytest==7.4.3
+pytest-asyncio==0.21.1
+black==23.12.1
+flake8==6.1.0
+mypy==1.7.1
+
+# Optional: For advanced features
+# sqlalchemy==2.0.23  # If database ORM needed
+# pydantic==2.5.0     # For data validation
