@@ -4,6 +4,7 @@ Intelligent dialogue handler using LLM for natural conversation and project plan
 """
 
 import logging
+import asyncio
 from typing import Optional, Dict, Any
 from llm.llm_client import LLMClient
 
@@ -60,43 +61,51 @@ Keep responses brief (1-3 sentences) and natural. Respond in the same language t
                 "content": user_message
             })
 
-            # Prepare messages for LLM
-            messages = self._prepare_messages()
+            # Format conversation as text
+            conversation_text = self._format_conversation_for_prompt()
 
             # Get response from LLM
-            response = self.llm_client.generate_text(
-                messages=messages,
+            response = asyncio.run(self.llm_client.generate(
+                prompt=conversation_text,
+                system_prompt=self.system_prompt,
                 max_tokens=300,
                 temperature=0.7
-            )
+            ))
+
+            # Extract text from response
+            agent_response = response.text.strip()
 
             # Add agent response to history
             self.conversation_history.append({
                 "role": "assistant",
-                "content": response
+                "content": agent_response
             })
 
-            return response
+            return agent_response
 
         except Exception as e:
             logger.error(f"Error in conversational agent: {str(e)}")
             return "I encountered an issue processing that. Could you please rephrase?"
 
-    def _prepare_messages(self) -> list[Dict[str, str]]:
+    def _format_conversation_for_prompt(self) -> str:
         """
-        Prepare messages for LLM API call
+        Format conversation history into a prompt string
         
         Returns:
-            Formatted messages list
+            Formatted conversation text
         """
-        messages = [
-            {"role": "system", "content": self.system_prompt}
-        ]
+        text_parts = []
         
-        # Add conversation history (limit to last 10 exchanges for context)
-        messages.extend(self.conversation_history[-10:])
+        # Add recent conversation history
+        for msg in self.conversation_history[-10:]:
+            role = msg["role"].capitalize()
+            content = msg["content"]
+            text_parts.append(f"{role}: {content}")
         
-        return messages
+        # Add prompt for agent to respond
+        text_parts.append("Assistant:")
+        
+        return "\n".join(text_parts)
 
     def analyze_project_description(self, description: str) -> Dict[str, Any]:
         """
@@ -123,19 +132,17 @@ IS_PROJECT_DESCRIPTION: [yes/no - is this clearly a project description?]
 
 Be concise and practical."""
 
-            messages = [
-                {"role": "system", "content": "You are a software project analyzer. Extract key information from project descriptions."},
-                {"role": "user", "content": analysis_prompt}
-            ]
+            system_prompt = "You are a software project analyzer. Extract key information from project descriptions."
 
-            response = self.llm_client.generate_text(
-                messages=messages,
+            response = asyncio.run(self.llm_client.generate(
+                prompt=analysis_prompt,
+                system_prompt=system_prompt,
                 max_tokens=300,
                 temperature=0.3
-            )
+            ))
 
             # Parse the response
-            return self._parse_project_analysis(response)
+            return self._parse_project_analysis(response.text)
 
         except Exception as e:
             logger.error(f"Error analyzing project description: {str(e)}")
