@@ -4,7 +4,6 @@ Intelligent dialogue handler using LLM for natural conversation and project plan
 """
 
 import logging
-import asyncio
 from typing import Optional, Dict, Any
 from llm.llm_client import LLMClient
 
@@ -44,7 +43,7 @@ When a user describes a project idea:
 
 Keep responses brief (1-3 sentences) and natural. Respond in the same language the user uses."""
 
-    def chat(self, user_message: str) -> str:
+    async def chat(self, user_message: str) -> str:
         """
         Process user message and generate response
         
@@ -65,12 +64,12 @@ Keep responses brief (1-3 sentences) and natural. Respond in the same language t
             conversation_text = self._format_conversation_for_prompt()
 
             # Get response from LLM
-            response = asyncio.run(self.llm_client.generate(
+            response = await self.llm_client.generate(
                 prompt=conversation_text,
                 system_prompt=self.system_prompt,
                 max_tokens=300,
                 temperature=0.7
-            ))
+            )
 
             # Extract text from response
             agent_response = response.text.strip()
@@ -107,7 +106,7 @@ Keep responses brief (1-3 sentences) and natural. Respond in the same language t
         
         return "\n".join(text_parts)
 
-    def analyze_project_description(self, description: str) -> Dict[str, Any]:
+    async def analyze_project_description(self, description: str) -> Dict[str, Any]:
         """
         Analyze user's project description and extract key information
         
@@ -134,12 +133,12 @@ Be concise and practical."""
 
             system_prompt = "You are a software project analyzer. Extract key information from project descriptions."
 
-            response = asyncio.run(self.llm_client.generate(
+            response = await self.llm_client.generate(
                 prompt=analysis_prompt,
                 system_prompt=system_prompt,
                 max_tokens=300,
                 temperature=0.3
-            ))
+            )
 
             # Parse the response
             return self._parse_project_analysis(response.text)

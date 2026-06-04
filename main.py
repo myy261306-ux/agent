@@ -8,6 +8,7 @@ import asyncio
 import sys
 from pathlib import Path
 from typing import Dict, Any
+import threading
 
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent))
@@ -70,9 +71,12 @@ async def run_conversational_loop(manager: MainManager, agent: ConversationalAge
     """
     print("\nAgent is ready to chat! Tell me about your project or type 'help' for options.\n")
     
+    loop = asyncio.get_event_loop()
+    
     while True:
         try:
-            user_input = input("You: ").strip()
+            # Get user input without blocking the event loop
+            user_input = await loop.run_in_executor(None, lambda: input("You: ").strip())
             
             if not user_input:
                 continue
@@ -94,13 +98,13 @@ async def run_conversational_loop(manager: MainManager, agent: ConversationalAge
                 continue
             
             # Get agent response
-            response = agent.chat(user_input)
+            response = await agent.chat(user_input)
             print(f"\nAgent: {response}\n")
             
             # Check if user is describing a project
             if agent.should_create_project(user_input):
                 # Analyze project description
-                project_info = agent.analyze_project_description(user_input)
+                project_info = await agent.analyze_project_description(user_input)
                 
                 if project_info.get('is_project_description'):
                     print("\nAnalyzing your project requirements...\n")
@@ -111,8 +115,12 @@ async def run_conversational_loop(manager: MainManager, agent: ConversationalAge
                     # Display plan
                     print(planner.display_plan(plan))
                     
-                    # Ask for confirmation
-                    confirm = input("Would you like to create this project? (yes/no): ").strip().lower()
+                    # Ask for confirmation (non-blocking)
+                    loop = asyncio.get_event_loop()
+                    confirm = await loop.run_in_executor(
+                        None, 
+                        lambda: input("Would you like to create this project? (yes/no): ").strip().lower()
+                    )
                     
                     if confirm in ['yes', 'y', 'ha', 'ji', 'theek']:
                         # Store plan context and proceed with project creation
